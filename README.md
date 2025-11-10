@@ -1,10 +1,13 @@
-# :earth_americas: GDP dashboard template
+# Predict adsoprtion capacity for three polymers!
 
-A simple Streamlit app showing the GDP of different countries in the world.
+A simple Streamlit app allows you to predict logKd for three different polimers (PE, PP, PS)
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://gdp-dashboard-template.streamlit.app/)
+### How to run it in two different ways!
 
-### How to run it on your own machine
+#### Just click in the link below:
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://kd4polymers.streamlit.app/)
+
+#### Try it out on our machine!
 
 1. Install the requirements
 
