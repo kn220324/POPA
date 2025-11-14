@@ -13,30 +13,26 @@ import matplotlib.pyplot as plt
 
 # =========================
 # Parameters
-# =========================
+
 PATH = "data/QSPR_data_app.xlsx"
 EXPECTED_POLYMERS = ["PE", "PP", "PS"]
 RANDOM_STATE = 42
 Q2_TEST_METHOD = "F1"  # "F1", "F2", "F3"
 
 # --- Feature selection config ---
-FEATURE_MODE = "manual"  # "combined" albo "manual"
-TOP_K = 1  # używane tylko w trybie "combined"
+FEATURE_MODE = "manual"
+TOP_K = 1
 
-# RĘCZNY wybór: globalnie
-MANUAL_FEATURES = ["logD", "M", "π"]  # <- wpisz swoje kolumny
+MANUAL_FEATURES = ["logD", "M", "π"]
 
-# RĘCZNY wybór: per-polimer (opcjonalnie nadpisuje globalne)
 MANUAL_FEATURES_PER_POLYMER = {
     # "PE": ["logD", "π"],
     # "PP": ["logD", "M", "q−"],
     # "PS": ["logD", "εβ"],
 }
 
-# Czy dopuszczamy fallback do combined, gdy ręczna lista jest pusta/nieprawidłowa?
-FALLBACK_TO_COMBINED_IF_INVALID = False  # ustaw True, jeśli chcesz miękki fallback
+FALLBACK_TO_COMBINED_IF_INVALID = False 
 
-# Pliki pomocnicze
 SPLIT_FILE = "data/train_test_compounds.xlsx"
 BEST_PARAMS_FILE = "data/model_REPORT_GB_by_polymer_logD+1.xlsx"
 
@@ -54,7 +50,7 @@ GB_PARAM_GRID = {
 
 # =========================
 # Load & clean
-# =========================
+
 df = pd.read_excel(PATH)
 compound_col = "Organic compound" if "Organic compound" in df.columns else "Organic compounds"
 
@@ -109,7 +105,7 @@ for c in num_cols:
 
 # =========================
 # Build X & Y — per POLYMER
-# =========================
+
 feat_cols = [c for c in ["logD", "εα", "εβ", "π", "M", "q−", "V'"] if c in df.columns]
 
 Y_wide = df.pivot_table(
@@ -134,8 +130,8 @@ print(
 )
 
 # =========================
-# Grouped train/test split — użyj zapisanych w Excelu, jeśli są
-# =========================
+# Grouped train/test split 
+
 try:
     x_train_prev = pd.read_excel(SPLIT_FILE, sheet_name="X_train", index_col=0)
     x_test_prev = pd.read_excel(SPLIT_FILE, sheet_name="X_test", index_col=0)
@@ -177,8 +173,8 @@ pred_train = {}
 pred_test = {}
 
 # =========================
-# (OPTIONAL) Feature ranking (combined) — TYLKO gdy FEATURE_MODE != "manual"
-# =========================
+# (OPTIONAL) Feature ranking 
+
 score_df = pd.DataFrame()
 selected_combined = []
 
@@ -277,7 +273,7 @@ else:
 
 # =========================
 # Helpers
-# =========================
+
 def rmse(y_true, y_pred):
     return float(
         np.sqrt(mean_squared_error(np.asarray(y_true), np.asarray(y_pred)))
@@ -370,7 +366,7 @@ def tune_with_groups(
 
 # -------------------------
 # Manual feature utility
-# -------------------------
+
 def sanitize_manual_features(candidates, available_cols):
     if not candidates:
         return [], []
@@ -402,8 +398,8 @@ def get_selected_features_for_polymer(pol, X_train_cols):
 
 
 # =========================
-# Wczytywanie zapisanych hiperparametrów GB z Excela (per polimer)
-# =========================
+# Hyperparameters
+
 best_params_external = {}
 
 try:
@@ -444,8 +440,8 @@ except FileNotFoundError:
     )
 except Exception as e:
     print(
-        f"[HP] Problem z wczytaniem hiperparametrów z '{BEST_PARAMS_FILE}' ({e}) — "
-        f"będę stroić GB GridSearchem."
+        f"[HP] Problem with hyperparameter loading from '{BEST_PARAMS_FILE}' ({e}) — "
+        f"I will try GB GridSearchem."
     )
 
 # =========================
@@ -489,7 +485,6 @@ for pol in Y_wide.columns:
         f"\n=== [{pol}] GradientBoosting | features: {selected_features} ==="
     )
 
-    # Jeśli mamy zapisane hiperparametry dla tego polimeru — użyj ich
     if pol in best_params_external:
         params = best_params_external[pol]
         est = GradientBoostingRegressor(
@@ -499,7 +494,6 @@ for pol in Y_wide.columns:
         best_params = params
         print(f"[GB] Używam zapisanych hiperparametrów dla {pol}: {params}")
     else:
-        # fallback: klasyczny GridSearchCV
         est, best_params = tune_with_groups(
             GB_ESTIMATOR, GB_PARAM_GRID, X_tr_all, y_tr, groups_train
         )
@@ -612,8 +606,8 @@ for pol in Y_wide.columns:
             ).sort_values(ascending=False)
 
 # =========================
-# OUTPUT: tabelki główne
-# =========================
+# OUTPUT: dataframe
+
 stats_df = pd.DataFrame(stats_rows + global_stats)
 
 if not stats_df.empty:
@@ -713,14 +707,6 @@ def get_trained_estimator_for_polymer(polymer: str):
 
 
 def _get_ad_basis_for_polymer(polymer: str):
-    """
-    Helper: zwraca obiekty niezbędne do liczenia leverage (h) i h*:
-      - est: wytrenowany model
-      - selected_feats: lista cech
-      - XtX_inv: (X'X)^(-1) dla macierzy projektującej
-      - h_crit: próg 3(p+1)/n
-      - X_full: macierz cech dla wszystkich związków użytych do obliczeń
-    """
     if polymer not in Y_wide.columns:
         raise ValueError(f"Polymer {polymer} not found in Y_wide.")
 
@@ -745,11 +731,6 @@ def _get_ad_basis_for_polymer(polymer: str):
 
 
 def compute_insubria_for_polymer(polymer: str):
-    """
-    Zwraca:
-      - DataFrame z leverage (h) i przewidywanym LogKd dla wszystkich związków (dane modelu),
-      - próg h* (3*(p+1)/n).
-    """
     est, selected_feats, XtX_inv, h_crit, X_full = _get_ad_basis_for_polymer(
         polymer
     )
@@ -782,14 +763,6 @@ def compute_insubria_for_polymer(polymer: str):
 def predict_single_compound(
     descriptor_dict: dict, polymers: list[str], compound_name: str = "compound"
 ) -> pd.DataFrame:
-    """
-    Zwraca tabelkę z:
-    - LogKd_pred
-    - Leverage_h
-    - h_crit
-    - AD_flag
-    dla każdego wybranego polimeru.
-    """
     X_new = pd.DataFrame([descriptor_dict], index=[compound_name])
     rows = []
 
@@ -890,13 +863,17 @@ You can:
 - predict **LogKd** for a single compound (manual input),
 - or upload a **file with descriptors** and get batch predictions for selected polymers.
 
+Descriptor used by model:
+- logD: n-octanol/water distribution coefficient at special pH value
+- π: ratio of average molecular polarizability and molecular volume
+- M: molecular mass
+
 For each prediction, you can also see:
 - **Leverage (h)** and
 - whether it is **inside / outside the applicability domain (AD)**.
 """
 )
 
-# Polimery dostępne faktycznie w danych
 AVAILABLE_POLYMERS = [p for p in EXPECTED_POLYMERS if p in Y_wide.columns]
 if not AVAILABLE_POLYMERS:
     st.error("No polymers found in Y_wide. Check that the model script loaded correctly.")
@@ -904,7 +881,6 @@ if not AVAILABLE_POLYMERS:
 
 FEATURE_COLUMNS = list(X_by_comp.columns)
 
-# Sidebar – wybór polimerów
 st.sidebar.header("Model settings")
 
 selected_polymers = st.sidebar.multiselect(
@@ -922,7 +898,7 @@ st.sidebar.write("Descriptors used by the model:")
 for c in FEATURE_COLUMNS:
     st.sidebar.write(f"- {c}")
 
-# Zakładki: pojedyncza predykcja vs batch vs Insubria (global)
+
 tab_single, tab_batch, tab_insubria = st.tabs(
     ["Single prediction", "Batch prediction", "Insubria plot (training data)"]
 )
