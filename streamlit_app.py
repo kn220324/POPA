@@ -31,7 +31,7 @@ MANUAL_FEATURES_PER_POLYMER = {
     # "PS": ["logD", "εβ"],
 }
 
-FALLBACK_TO_COMBINED_IF_INVALID = False 
+FALLBACK_TO_COMBINED_IF_INVALID = False
 
 SPLIT_FILE = "data/train_test_compounds.xlsx"
 BEST_PARAMS_FILE = "data/model_REPORT_GB_by_polymer_logD+1.xlsx"
@@ -130,7 +130,7 @@ print(
 )
 
 # =========================
-# Grouped train/test split 
+# Grouped train/test split
 
 try:
     x_train_prev = pd.read_excel(SPLIT_FILE, sheet_name="X_train", index_col=0)
@@ -173,7 +173,7 @@ pred_train = {}
 pred_test = {}
 
 # =========================
-# (OPTIONAL) Feature ranking 
+# (OPTIONAL) Feature ranking
 
 score_df = pd.DataFrame()
 selected_combined = []
@@ -995,12 +995,27 @@ with tab_single:
                 c="darkseagreen"
             )
 
+            # pionowa linia h*
             ax.axvline(
                 h_crit,
                 linestyle="--",
                 linewidth=1.5,
                 label=f"h* = {h_crit:.3f}",
+                color='gray'
             )
+
+            # POZIOME linie: y_min, y_max tylko ze zbioru treningowego
+            y_min_tr = float(df_ins_train["LogKd_pred"].min())
+            y_max_tr = float(df_ins_train["LogKd_pred"].max())
+            x_min, x_max = ax.get_xlim()
+            ax.hlines(
+                [y_min_tr, y_max_tr],
+                x_min,
+                x_max,
+                colors="gray",
+                linewidth=1.0,
+            )
+            ax.set_xlim(x_min, x_max)
 
             ax.set_xlabel("Leverage (h)")
             ax.set_ylabel("Predicted LogKd")
@@ -1128,13 +1143,27 @@ Upload a **CSV or Excel** file that contains at least the following columns
                                 c="darkseagreen"
                             )
 
+                            # pionowa linia h*
                             ax_b.axvline(
                                 h_crit,
                                 linestyle="--",
                                 linewidth=1.5,
                                 label=f"h* = {h_crit:.3f}",
-                                c="gray"
+                                color="gray",
                             )
+
+                            # POZIOME linie: y_min, y_max tylko ze zbioru treningowego
+                            y_min_tr = float(df_ins_train["LogKd_pred"].min())
+                            y_max_tr = float(df_ins_train["LogKd_pred"].max())
+                            x_min, x_max = ax_b.get_xlim()
+                            ax_b.hlines(
+                                [y_min_tr, y_max_tr],
+                                x_min,
+                                x_max,
+                                colors="gray",
+                                linewidth=1.0,
+                            )
+                            ax_b.set_xlim(x_min, x_max)
 
                             ax_b.set_xlabel("Leverage (h)")
                             ax_b.set_ylabel("Predicted LogKd")
@@ -1209,12 +1238,27 @@ with tab_insubria:
                     alpha=0.9,
                 )
 
+            # pionowa linia h*
             ax_t.axvline(
                 h_crit,
                 linestyle="--",
                 linewidth=1.5,
                 label=f"h* = {h_crit:.3f}",
+                color='gray'
             )
+
+            # POZIOME linie: y_min, y_max ze zbioru treningowego (df_ins)
+            y_min_tr = float(df_ins["LogKd_pred"].min())
+            y_max_tr = float(df_ins["LogKd_pred"].max())
+            x_min, x_max = ax_t.get_xlim()
+            ax_t.hlines(
+                [y_min_tr, y_max_tr],
+                x_min,
+                x_max,
+                colors="gray",
+                linewidth=1.0,
+            )
+            ax_t.set_xlim(x_min, x_max)
 
             ax_t.set_xlabel("Leverage (h)")
             ax_t.set_ylabel("Predicted LogKd")
