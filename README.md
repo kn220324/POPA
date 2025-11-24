@@ -2,6 +2,10 @@
 
 A simple Streamlit app allows you to predict logKd for three different polymers (PE, PP, PS).
 
+You can choose between two models:
+- **Gaussian-based model**: Descriptors used by the model were calculated by Gaussian (π, M)
+- **Rdkit-based model**: Descriptors used by the model were calculated by Rdkit (π, M)
+
 ### How to run it?
 
 #### Just click in the link below:
