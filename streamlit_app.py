@@ -53,7 +53,7 @@ MODEL_CONFIGS = {
     },
     "RDKit descriptors": {
         # Dane z deskryptorami z RDKit (np. SHEET = "rdkit_model" z QSPR_data.xlsx)
-        "data_path": "data/QSPR_data_app.xlsx",     # <-- np. Twój QSPR_data.xlsx
+        "data_path": "data/QSPR_data_app_rdkit.xlsx",     # <-- np. Twój QSPR_data.xlsx
         "sheet_name": None,                  # <-- tak jak w Twoim offline skrypcie
         "split_file": "data/train_test_compounds_rdkit.xlsx",   # <-- Twój train_test_compounds.xlsx dla tego modelu
         "report_file": "data/model_REPORT_GB_by_polymer_rdkit.xlsx",  # Twój istniejący raport
