@@ -35,34 +35,24 @@ FALLBACK_TO_COMBINED_IF_INVALID = False
 
 GB_ESTIMATOR = GradientBoostingRegressor(random_state=RANDOM_STATE)
 
-# Jeśli dla danego modelu nie znajdzie hiperparametrów w Excelu,
-# możesz ewentualnie użyć siatki i GridSearcha – na razie nie robimy tuningu w UI.
 
-
-# =========================
-# Konfiguracje dla dwóch modeli
-# =========================
-# >>> TUTAJ PODSTAW SWOJE KONKRETNE ŚCIEŻKI I ARKUSZE <<<
 MODEL_CONFIGS = {
     "Gaussian descriptors": {
         # Dane z deskryptorami z Gaussiana
-        "data_path": "data/QSPR_data_app.xlsx",     # <-- podmień na swój plik (np. QSPR_data_app.xlsx)
-        "sheet_name": None,                           # np. "gauss_model" jeśli masz arkusz
-        "split_file": "data/train_test_compounds.xlsx",   # plik z X_train/X_test/y_train/y_test (jeśli masz)
-        "report_file": "data/model_REPORT_GB_by_polymer_logD+1.xlsx",  # plik z arkuszem "Best params per polymer" (jeśli masz)
+        "data_path": "data/QSPR_data_app.xlsx",
+        "sheet_name": None,
+        "split_file": "data/train_test_compounds.xlsx",
+        "report_file": "data/model_REPORT_GB_by_polymer_logD+1.xlsx",
     },
     "RDKit descriptors": {
-        # Dane z deskryptorami z RDKit (np. SHEET = "rdkit_model" z QSPR_data.xlsx)
-        "data_path": "data/QSPR_data_app_rdkit.xlsx",     # <-- np. Twój QSPR_data.xlsx
-        "sheet_name": None,                  # <-- tak jak w Twoim offline skrypcie
-        "split_file": "data/train_test_compounds_rdkit.xlsx",   # <-- Twój train_test_compounds.xlsx dla tego modelu
-        "report_file": "data/model_REPORT_GB_by_polymer_rdkit.xlsx",  # Twój istniejący raport
+        "data_path": "data/QSPR_data_app_rdkit.xlsx",
+        "sheet_name": None,
+        "split_file": "data/train_test_compounds_rdkit.xlsx",
+        "report_file": "data/model_REPORT_GB_by_polymer_rdkit.xlsx",
     },
 }
 
-# =========================
-# Pomocnicze funkcje wspólne
-# =========================
+# Helpers
 
 def clean_number(x):
     if pd.isna(x):
@@ -273,9 +263,7 @@ def compute_combined_ranking(X_train_all, Y_train_all, top_k=1):
     return score_df, selected_combined
 
 
-# =========================
-# Struktura danych dla modelu
-# =========================
+# Data structure for models
 
 class ModelState:
     def __init__(self, name, config, X_by_comp, Y_wide,
@@ -294,9 +282,7 @@ class ModelState:
         self.selected_combined = selected_combined
 
 
-# =========================
-# Ładowanie modelu (cały pipeline) – per model_name
-# =========================
+# Pipeline loading
 
 @st.cache_resource
 def load_model_state(model_name: str) -> ModelState:
@@ -307,7 +293,7 @@ def load_model_state(model_name: str) -> ModelState:
     split_file = cfg.get("split_file", None)
     report_file = cfg.get("report_file", None)
 
-    # --- 1) Wczytaj dane ---
+    # Load the data
     if sheet_name:
         df = pd.read_excel(data_path, sheet_name=sheet_name)
     else:
@@ -351,7 +337,7 @@ def load_model_state(model_name: str) -> ModelState:
         f"features: {list(X_by_comp.columns)}; polymer targets: {list(Y_wide.columns)}"
     )
 
-    # --- 2) Train/test split z pliku lub GroupShuffleSplit ---
+    # Train/test split
     if split_file:
         try:
             x_train_prev = pd.read_excel(split_file, sheet_name="X_train", index_col=0)
@@ -398,7 +384,7 @@ def load_model_state(model_name: str) -> ModelState:
 
     feature_columns = list(X_by_comp.columns)
 
-    # --- 3) Ranking cech (jeśli FEATURE_MODE != 'manual') ---
+    # Feature ranking
     selected_combined = []
     if FEATURE_MODE.lower() != "manual":
         score_df, selected_combined = compute_combined_ranking(X_train_all, Y_train_all, TOP_K)
@@ -406,7 +392,7 @@ def load_model_state(model_name: str) -> ModelState:
     else:
         print(f"[{model_name}] FEATURE_MODE='manual' — pomijam automatyczny ranking.")
 
-    # --- 4) Hiperparametry per-polimer z raportu (jeśli jest) ---
+    # Hyperparameters
     best_params_per_polymer = {}
     if report_file:
         try:
@@ -463,9 +449,8 @@ def load_model_state(model_name: str) -> ModelState:
     return state
 
 
-# =========================
-# Funkcje modelowe zależne od state
-# =========================
+
+# Functions depend on the condition (polymer)
 
 def get_estimator_for_polymer(state: ModelState, polymer: str):
     """Tworzy i trenuje estymator na pełnym zbiorze (Y_wide notna), z zapisanymi hiperparametrami jeśli są."""
@@ -618,9 +603,7 @@ def predict_batch(state: ModelState, df_input: pd.DataFrame, polymers: list[str]
     return df
 
 
-# =========================
 # STREAMLIT UI
-# =========================
 
 st.set_page_config(
     page_title="LogKd prediction for microplastics – two models",
@@ -686,7 +669,7 @@ tab_single, tab_batch, tab_insubria = st.tabs(
     ["Single prediction", "Batch prediction", "Insubria plot (training data)"]
 )
 
-# ---------------- Single prediction ----------------
+# Single prediction
 with tab_single:
     st.subheader(f"Single compound prediction – {model_name}")
 
@@ -811,7 +794,7 @@ with tab_single:
                 key=f"dl_single_{pol}_{model_name}",
             )
 
-# ---------------- Batch prediction ----------------
+# Batch prediction
 with tab_batch:
     st.subheader(f"Batch prediction from file – {model_name}")
 
@@ -957,7 +940,7 @@ Upload a **CSV or Excel** file that contains at least the following columns
                                 key=f"dl_batch_insubria_{pol_batch}_{model_name}",
                             )
 
-# ---------------- Insubria plot (training only) ----------------
+# Insubria plot (training only)
 with tab_insubria:
     st.subheader(f"Insubria plot – training data only – {model_name}")
 
