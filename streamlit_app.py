@@ -19,6 +19,13 @@ EXPECTED_POLYMERS = ["PE", "PP", "PS"]
 RANDOM_STATE = 42
 Q2_TEST_METHOD = "F1"  # "F1", "F2", "F3"
 
+# --- Colors for polymers (Insubria plots) ---
+poly_colors = {
+    "PE": "#1f77b4",
+    "PP": "tomato",
+    "PS": "forestgreen",
+}
+
 # --- Feature selection config (wspólne dla obu modeli) ---
 FEATURE_MODE = "manual"  # "combined" albo "manual"
 TOP_K = 1
@@ -34,7 +41,6 @@ MANUAL_FEATURES_PER_POLYMER = {
 FALLBACK_TO_COMBINED_IF_INVALID = False
 
 GB_ESTIMATOR = GradientBoostingRegressor(random_state=RANDOM_STATE)
-
 
 MODEL_CONFIGS = {
     "Gaussian descriptors": {
@@ -53,6 +59,7 @@ MODEL_CONFIGS = {
 }
 
 # Helpers
+
 
 def clean_number(x):
     if pd.isna(x):
@@ -88,17 +95,11 @@ def norm_polymer(s):
 
 
 def rmse(y_true, y_pred):
-    return float(
-        np.sqrt(mean_squared_error(np.asarray(y_true), np.asarray(y_pred)))
-    )
+    return float(np.sqrt(mean_squared_error(np.asarray(y_true), np.asarray(y_pred))))
 
 
 def bias(y_true, y_pred):
-    return float(
-        np.mean(
-            np.asarray(y_pred, float) - np.asarray(y_true, float)
-        )
-    )
+    return float(np.mean(np.asarray(y_pred, float) - np.asarray(y_true, float)))
 
 
 def mpe(y_true, y_pred):
@@ -106,12 +107,7 @@ def mpe(y_true, y_pred):
     mask = y != 0
     if mask.sum() == 0:
         return np.nan
-    return float(
-        100
-        * np.mean(
-            (np.asarray(y_pred, dtype=float)[mask] - y[mask]) / y[mask]
-        )
-    )
+    return float(100 * np.mean((np.asarray(y_pred, dtype=float)[mask] - y[mask]) / y[mask]))
 
 
 def mne(y_true, y_pred):
@@ -122,8 +118,7 @@ def mne(y_true, y_pred):
     return float(
         100
         * np.mean(
-            np.abs(np.asarray(y_pred, dtype=float)[mask] - y[mask])
-            / np.abs(y[mask])
+            np.abs(np.asarray(y_pred, dtype=float)[mask] - y[mask]) / np.abs(y[mask])
         )
     )
 
@@ -224,14 +219,14 @@ def compute_combined_ranking(X_train_all, Y_train_all, top_k=1):
 
     def z(s):
         sd = s.std(ddof=0)
-        return (s - s.mean()) / sd if sd and np.isfinite(sd) and sd > 0 else pd.Series(
-            0.0, index=s.index
+        return (
+            (s - s.mean()) / sd
+            if sd and np.isfinite(sd) and sd > 0
+            else pd.Series(0.0, index=s.index)
         )
 
-    score_df["combined"] = (
-        z(score_df["pearson_abs"])
-        + z(score_df["spearman_abs"])
-        + z(score_df["mi"])
+    score_df["combined"] = z(score_df["pearson_abs"]) + z(score_df["spearman_abs"]) + z(
+        score_df["mi"]
     )
     score_df = score_df.sort_values("combined", ascending=False)
     ranked_features = (
@@ -265,10 +260,22 @@ def compute_combined_ranking(X_train_all, Y_train_all, top_k=1):
 
 # Data structure for models
 
+
 class ModelState:
-    def __init__(self, name, config, X_by_comp, Y_wide,
-                 X_train_all, X_test_all, Y_train_all, Y_test_all,
-                 feature_columns, best_params_per_polymer, selected_combined):
+    def __init__(
+        self,
+        name,
+        config,
+        X_by_comp,
+        Y_wide,
+        X_train_all,
+        X_test_all,
+        Y_train_all,
+        Y_test_all,
+        feature_columns,
+        best_params_per_polymer,
+        selected_combined,
+    ):
         self.name = name
         self.config = config
         self.X_by_comp = X_by_comp
@@ -283,6 +290,7 @@ class ModelState:
 
 
 # Pipeline loading
+
 
 @st.cache_resource
 def load_model_state(model_name: str) -> ModelState:
@@ -299,9 +307,19 @@ def load_model_state(model_name: str) -> ModelState:
     else:
         df = pd.read_excel(data_path)
 
-    compound_col = "Organic compound" if "Organic compound" in df.columns else "Organic compounds"
+    compound_col = (
+        "Organic compound" if "Organic compound" in df.columns else "Organic compounds"
+    )
 
-    COLMAP = {"q-": "q−", "q–": "q−", "q—": "q−", "V’": "V'", "V´": "V'", "V`": "V'", "Vʼ": "V'"}
+    COLMAP = {
+        "q-": "q−",
+        "q–": "q−",
+        "q—": "q−",
+        "V’": "V'",
+        "V´": "V'",
+        "V`": "V'",
+        "Vʼ": "V'",
+    }
     df = df.rename(columns={c: COLMAP.get(c, c) for c in df.columns})
 
     if "Polymer" not in df.columns:
@@ -318,7 +336,9 @@ def load_model_state(model_name: str) -> ModelState:
     Y_wide = df.pivot_table(
         index=compound_col, columns="Polymer", values="LogKd", aggfunc="first"
     )
-    Y_wide = Y_wide.reindex(columns=[p for p in EXPECTED_POLYMERS if p in Y_wide.columns])
+    Y_wide = Y_wide.reindex(
+        columns=[p for p in EXPECTED_POLYMERS if p in Y_wide.columns]
+    )
 
     X_by_comp = (
         df[[compound_col] + feat_cols]
@@ -350,7 +370,9 @@ def load_model_state(model_name: str) -> ModelState:
             test_compounds = [c for c in test_compounds if c in X_by_comp.index]
 
             if len(train_compounds) == 0 or len(test_compounds) == 0:
-                raise ValueError("Brak wspólnych związków między SPLIT_FILE a aktualnym X_by_comp.")
+                raise ValueError(
+                    "Brak wspólnych związków między SPLIT_FILE a aktualnym X_by_comp."
+                )
 
             print(
                 f"[{model_name}][SPLIT] Używam podziału z pliku '{split_file}': "
@@ -363,7 +385,9 @@ def load_model_state(model_name: str) -> ModelState:
                 f"Tworzę nowy GroupShuffleSplit."
             )
             groups_all = np.array(X_by_comp.index)
-            gss = GroupShuffleSplit(n_splits=1, test_size=0.35, random_state=RANDOM_STATE)
+            gss = GroupShuffleSplit(
+                n_splits=1, test_size=0.35, random_state=RANDOM_STATE
+            )
             train_idx, test_idx = next(gss.split(X_by_comp, Y_wide, groups=groups_all))
             train_compounds = X_by_comp.index[train_idx]
             test_compounds = X_by_comp.index[test_idx]
@@ -380,15 +404,21 @@ def load_model_state(model_name: str) -> ModelState:
     Y_train_all = Y_wide.loc[train_compounds].copy()
     Y_test_all = Y_wide.loc[test_compounds].copy()
 
-    print(f"[{model_name}] Train compounds: {len(train_compounds)} | Test compounds: {len(test_compounds)}")
+    print(
+        f"[{model_name}] Train compounds: {len(train_compounds)} | Test compounds: {len(test_compounds)}"
+    )
 
     feature_columns = list(X_by_comp.columns)
 
     # Feature ranking
     selected_combined = []
     if FEATURE_MODE.lower() != "manual":
-        score_df, selected_combined = compute_combined_ranking(X_train_all, Y_train_all, TOP_K)
-        print(f"[{model_name}] Selected descriptors by combined (TOP_K={TOP_K}): {selected_combined}")
+        score_df, selected_combined = compute_combined_ranking(
+            X_train_all, Y_train_all, TOP_K
+        )
+        print(
+            f"[{model_name}] Selected descriptors by combined (TOP_K={TOP_K}): {selected_combined}"
+        )
     else:
         print(f"[{model_name}] FEATURE_MODE='manual' — pomijam automatyczny ranking.")
 
@@ -424,14 +454,18 @@ def load_model_state(model_name: str) -> ModelState:
                 f"{list(best_params_per_polymer.keys())}"
             )
         except FileNotFoundError:
-            print(f"[{model_name}][HP] Plik '{report_file}' nie istnieje — użyję domyślnych parametrów GB.")
+            print(
+                f"[{model_name}][HP] Plik '{report_file}' nie istnieje — użyję domyślnych parametrów GB."
+            )
         except Exception as e:
             print(
                 f"[{model_name}][HP] Problem z wczytaniem hiperparametrów z '{report_file}' ({e}) — "
                 f"użyję domyślnych parametrów GB."
             )
     else:
-        print(f"[{model_name}][HP] Brak report_file w config — użyję domyślnych parametrów GB.")
+        print(
+            f"[{model_name}][HP] Brak report_file w config — użyję domyślnych parametrów GB."
+        )
 
     state = ModelState(
         name=model_name,
@@ -449,8 +483,8 @@ def load_model_state(model_name: str) -> ModelState:
     return state
 
 
-
 # Functions depend on the condition (polymer)
+
 
 def get_estimator_for_polymer(state: ModelState, polymer: str):
     """Tworzy i trenuje estymator na pełnym zbiorze (Y_wide notna), z zapisanymi hiperparametrami jeśli są."""
@@ -466,16 +500,12 @@ def get_estimator_for_polymer(state: ModelState, polymer: str):
 
     y_full = state.Y_wide[polymer].dropna()
     if len(y_full) < 4:
-        raise ValueError(
-            f"Not enough data to train model for polymer {polymer} (n={len(y_full)})."
-        )
+        raise ValueError(f"Not enough data to train model for polymer {polymer} (n={len(y_full)}).")
 
     X_full = state.X_by_comp.loc[y_full.index, selected_features]
 
     params = state.best_params_per_polymer.get(polymer, {})
-    est = GradientBoostingRegressor(
-        random_state=RANDOM_STATE, **params
-    )
+    est = GradientBoostingRegressor(random_state=RANDOM_STATE, **params)
     est.fit(X_full, y_full)
 
     return est, selected_features, X_full, y_full
@@ -496,9 +526,7 @@ def get_ad_basis_for_polymer(state: ModelState, polymer: str):
 
 
 def compute_insubria_for_polymer(state: ModelState, polymer: str):
-    est, selected_feats, XtX_inv, h_crit, X_full = get_ad_basis_for_polymer(
-        state, polymer
-    )
+    est, selected_feats, XtX_inv, h_crit, X_full = get_ad_basis_for_polymer(state, polymer)
 
     y_pred = est.predict(X_full)
 
@@ -514,9 +542,7 @@ def compute_insubria_for_polymer(state: ModelState, polymer: str):
         }
     ).set_index("Compound")
 
-    df_ins["AD_flag"] = np.where(
-        df_ins["Leverage_h"] <= h_crit, "Inside AD", "Outside AD"
-    )
+    df_ins["AD_flag"] = np.where(df_ins["Leverage_h"] <= h_crit, "Inside AD", "Outside AD")
 
     return df_ins, float(h_crit)
 
@@ -529,9 +555,7 @@ def predict_single_compound(
 
     for pol in polymers:
         try:
-            est, selected_feats, XtX_inv, h_crit, X_full = get_ad_basis_for_polymer(
-                state, pol
-            )
+            est, selected_feats, XtX_inv, h_crit, X_full = get_ad_basis_for_polymer(state, pol)
 
             X_pol = X_new[selected_feats]
             y_pred = est.predict(X_pol)[0]
@@ -583,9 +607,7 @@ def predict_batch(state: ModelState, df_input: pd.DataFrame, polymers: list[str]
         raise ValueError(f"Missing required feature columns: {missing}")
 
     for pol in polymers:
-        est, selected_feats, XtX_inv, h_crit, X_full = get_ad_basis_for_polymer(
-            state, pol
-        )
+        est, selected_feats, XtX_inv, h_crit, X_full = get_ad_basis_for_polymer(state, pol)
 
         X_pol = df[selected_feats]
         preds = est.predict(X_pol)
@@ -596,9 +618,7 @@ def predict_batch(state: ModelState, df_input: pd.DataFrame, polymers: list[str]
         h_new = np.sum(AX_new * X_design_new, axis=1)
 
         df[f"Leverage_h_{pol}"] = h_new
-        df[f"AD_flag_{pol}"] = np.where(
-            h_new <= h_crit, "Inside AD", "Outside AD"
-        )
+        df[f"AD_flag_{pol}"] = np.where(h_new <= h_crit, "Inside AD", "Outside AD")
 
     return df
 
@@ -641,7 +661,9 @@ with st.spinner(f"Loading model data for: {model_name}"):
 
 AVAILABLE_POLYMERS = [p for p in EXPECTED_POLYMERS if p in state.Y_wide.columns]
 if not AVAILABLE_POLYMERS:
-    st.error(f"No polymers found in Y_wide for model '{model_name}'. Check that the data loaded correctly.")
+    st.error(
+        f"No polymers found in Y_wide for model '{model_name}'. Check that the data loaded correctly."
+    )
     st.stop()
 
 FEATURE_COLUMNS = list(state.feature_columns)
@@ -693,9 +715,7 @@ with tab_single:
 
     if st.button("Predict LogKd for this compound", key=f"{model_name}_btn_single"):
         with st.spinner("Running predictions..."):
-            df_res = predict_single_compound(
-                state, descriptor_values, selected_polymers, compound_name
-            )
+            df_res = predict_single_compound(state, descriptor_values, selected_polymers, compound_name)
 
         st.write("Predictions with applicability domain info:")
         st.dataframe(df_res, use_container_width=True)
@@ -704,6 +724,7 @@ with tab_single:
 
         for pol in selected_polymers:
             st.markdown(f"**Polymer: {pol}**")
+            poly_color = poly_colors.get(pol, "gray")
 
             row_pol = df_res[df_res["Polymer"] == pol]
             if row_pol.empty:
@@ -737,6 +758,7 @@ with tab_single:
                     df_in["LogKd_pred"],
                     label="Training – inside AD",
                     alpha=0.7,
+                    color=poly_color,
                 )
             if not df_out.empty:
                 ax.scatter(
@@ -744,7 +766,10 @@ with tab_single:
                     df_out["LogKd_pred"],
                     label="Training – outside AD",
                     marker="s",
-                    alpha=0.8,
+                    alpha=0.7,
+                    facecolors="none",
+                    edgecolors=poly_color,
+                    linewidths=1.2,
                 )
 
             ax.scatter(
@@ -754,12 +779,16 @@ with tab_single:
                 s=140,
                 linewidths=1.2,
                 label=f"New compound: {compound_name}",
+                color=poly_color,
+                edgecolors="black",
+                alpha=0.7
             )
 
             ax.axvline(
                 h_crit,
                 linestyle="--",
                 linewidth=1.5,
+                color="gray",
                 label=f"h* = {h_crit:.3f}",
             )
 
@@ -771,6 +800,7 @@ with tab_single:
                 x_min,
                 x_max,
                 linewidth=1.0,
+                color="gray"
             )
             ax.set_xlim(x_min, x_max)
 
@@ -806,9 +836,7 @@ Upload a **CSV or Excel** file that contains at least the following columns
     )
     st.code(", ".join(FEATURE_COLUMNS), language="text")
 
-    uploaded_file = st.file_uploader(
-        "Upload CSV or Excel", type=["csv", "xlsx"], key=f"{model_name}_upload"
-    )
+    uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"], key=f"{model_name}_upload")
 
     if uploaded_file is not None:
         if uploaded_file.name.lower().endswith(".csv"):
@@ -830,12 +858,8 @@ Upload a **CSV or Excel** file that contains at least the following columns
                     except Exception as e:
                         st.error(f"Error during prediction: {e}")
                     else:
-                        st.write(
-                            "Predictions with applicability domain info (first rows):"
-                        )
-                        st.dataframe(
-                            df_pred.head(), use_container_width=True
-                        )
+                        st.write("Predictions with applicability domain info (first rows):")
+                        st.dataframe(df_pred.head(), use_container_width=True)
 
                         csv_bytes = df_pred.to_csv(index=False).encode("utf-8")
                         st.download_button(
@@ -849,6 +873,7 @@ Upload a **CSV or Excel** file that contains at least the following columns
 
                         for pol_batch in selected_polymers:
                             st.markdown(f"**Polymer: {pol_batch}**")
+                            poly_color = poly_colors.get(pol_batch, "gray")
 
                             col_h = f"Leverage_h_{pol_batch}"
                             col_y = f"LogKd_{pol_batch}"
@@ -876,6 +901,7 @@ Upload a **CSV or Excel** file that contains at least the following columns
                                     df_in["LogKd_pred"],
                                     label="Training – inside AD",
                                     alpha=0.7,
+                                    color=poly_color,
                                 )
                             if not df_out.empty:
                                 ax_b.scatter(
@@ -883,7 +909,10 @@ Upload a **CSV or Excel** file that contains at least the following columns
                                     df_out["LogKd_pred"],
                                     label="Training – outside AD",
                                     marker="s",
-                                    alpha=0.8,
+                                    alpha=0.7,
+                                    facecolors="none",
+                                    edgecolors=poly_color,
+                                    linewidths=1.2,
                                 )
 
                             ax_b.scatter(
@@ -892,13 +921,17 @@ Upload a **CSV or Excel** file that contains at least the following columns
                                 marker="^",
                                 s=60,
                                 label="Batch samples",
-                                alpha=0.9,
+                                alpha=0.7,
+                                color=poly_color,
+                                edgecolors="black",
+                                linewidths=0.6,
                             )
 
                             ax_b.axvline(
                                 h_crit,
                                 linestyle="--",
                                 linewidth=1.5,
+                                color="gray",
                                 label=f"h* = {h_crit:.3f}",
                             )
 
@@ -910,26 +943,20 @@ Upload a **CSV or Excel** file that contains at least the following columns
                                 x_min,
                                 x_max,
                                 linewidth=1.0,
+                                color="gray"
                             )
                             ax_b.set_xlim(x_min, x_max)
 
                             ax_b.set_xlabel("Leverage (h)")
                             ax_b.set_ylabel("Predicted LogKd")
-                            ax_b.set_title(
-                                f"Insubria plot – batch vs training ({pol_batch}) – {model_name}"
-                            )
+                            ax_b.set_title(f"Insubria plot – batch vs training ({pol_batch}) – {model_name}")
                             ax_b.legend()
                             ax_b.grid(True, alpha=0.3)
 
                             st.pyplot(fig_b)
 
                             buf_b = io.BytesIO()
-                            fig_b.savefig(
-                                buf_b,
-                                format="png",
-                                dpi=300,
-                                bbox_inches="tight",
-                            )
+                            fig_b.savefig(buf_b, format="png", dpi=300, bbox_inches="tight")
                             buf_b.seek(0)
 
                             st.download_button(
@@ -957,6 +984,8 @@ with tab_insubria:
         except Exception as e:
             st.error(f"Cannot generate Insubria plot: {e}")
         else:
+            poly_color = poly_colors.get(pol_for_ad, "gray")
+
             st.markdown(
                 f"""
                 **Insubria plot** (leverage vs predicted LogKd) for polymer **{pol_for_ad}** (training data)  
@@ -978,6 +1007,7 @@ with tab_insubria:
                     df_in["LogKd_pred"],
                     label="Inside AD",
                     alpha=0.8,
+                    color=poly_color,
                 )
             if not df_out.empty:
                 ax_t.scatter(
@@ -986,11 +1016,15 @@ with tab_insubria:
                     label="Outside AD",
                     marker="s",
                     alpha=0.9,
+                    facecolors="none",
+                    edgecolors=poly_color,
+                    linewidths=1.2,
                 )
 
             ax_t.axvline(
                 h_crit,
                 linestyle="--",
+                color="gray",
                 linewidth=1.5,
                 label=f"h* = {h_crit:.3f}",
             )
@@ -1003,6 +1037,7 @@ with tab_insubria:
                 x_min,
                 x_max,
                 linewidth=1.0,
+                color="gray"
             )
             ax_t.set_xlim(x_min, x_max)
 
@@ -1015,9 +1050,7 @@ with tab_insubria:
             st.pyplot(fig_t)
 
             buf_t = io.BytesIO()
-            fig_t.savefig(
-                buf_t, format="png", dpi=300, bbox_inches="tight"
-            )
+            fig_t.savefig(buf_t, format="png", dpi=300, bbox_inches="tight")
             buf_t.seek(0)
 
             st.download_button(
@@ -1038,10 +1071,7 @@ with tab_insubria:
             )
 
             st.write("Data used for the plot:")
-            st.dataframe(
-                df_ins.sort_values("Leverage_h", ascending=False),
-                use_container_width=True,
-            )
+            st.dataframe(df_ins.sort_values("Leverage_h", ascending=False), use_container_width=True)
 
 st.markdown("---")
 st.caption(
