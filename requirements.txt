@@ -5,5 +5,5 @@ scikit-learn>=1.4,<1.6
 openpyxl
 xlsxwriter
 matplotlib
-
+rdkit
 
