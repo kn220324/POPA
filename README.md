@@ -9,7 +9,7 @@ You can choose between two models:
 ### How to run it?
 
 #### Just click in the link below:
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://kd4polymers.streamlit.app/)
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://mp-adsorbnet.streamlit.app)
 
 ### What do you need?
 For every organic compound you will need:
