@@ -1,13 +1,9 @@
-import io
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-import re
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.ensemble import GradientBoostingRegressor
-import matplotlib.pyplot as plt
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 from rdkit.Chem import rdMolDescriptors
@@ -20,12 +16,23 @@ EXPECTED_POLYMERS = ["PE", "PP", "PS"]
 RANDOM_STATE = 42
 Q2_TEST_METHOD = "F1"  # "F1", "F2", "F3"
 
-# --- Colors for polymers (plots) ---
+# --- Colors for polymers ---
 poly_colors = {
     "PE": "#1f77b4",
-    "PP": "tomato",
-    "PS": "forestgreen",
+    "PP": "#e85d4e",
+    "PS": "#2e8b57",
 }
+
+# --- Full polymer names (display only; internal data still uses PE/PP/PS) ---
+POLYMER_NAMES = {
+    "PE": "Polyethylene",
+    "PP": "Polypropylene",
+    "PS": "Polystyrene",
+}
+
+# --- Contact / feedback (EDIT THESE) ---
+CONTACT_EMAIL = "kinga.nimz@pg.edu.pl"        # <-- podmień na swój adres
+ISSUES_URL = ""                                  # <-- opcjonalnie: link do repo/Issues (np. GitHub), zostaw "" jeśli brak
 
 # --- Feature selection config (wspólne dla obu modeli) ---
 FEATURE_MODE = "manual"  # "combined" albo "manual"
@@ -40,7 +47,7 @@ MANUAL_FEATURES_PER_POLYMER = {
 FALLBACK_TO_COMBINED_IF_INVALID = False
 
 MODEL_CONFIGS = {
-    "Gaussian descriptors": {
+    "Quantum mechanical (QM) descriptors": {
         "data_path": "data/QSPR_data_app.xlsx",
         "sheet_name": None,
         "split_file": "data/train_test_compounds.xlsx",
@@ -471,53 +478,16 @@ def get_ad_basis_for_polymer(state: ModelState, polymer: str):
 
 
 # =========================
-# TRAINING AD plot (to co miałaś jako "Insubria training")
+# AD basis (leverage / applicability domain) used in predictions
 # =========================
-def compute_training_ad_plot_data(state: ModelState, polymer: str):
-    """
-    To NIE jest Insubria wg Twojej definicji.
-    To jest training-domain plot: leverage vs predicted (training points),
-    z flagą inside/outside AD.
-    """
+def compute_ad_basis_for_polymer(state: ModelState, polymer: str):
     est, selected_feats, XtX_inv, h_crit, Xtr, ytr = get_ad_basis_for_polymer(state, polymer)
-
-    y_pred_tr = est.predict(Xtr)
-
-    X_design_tr = np.column_stack([np.ones(len(Xtr)), Xtr.values])
-    AX = X_design_tr @ XtX_inv
-    h = np.sum(AX * X_design_tr, axis=1)
-
-    df_tr = pd.DataFrame(
-        {
-            "Compound": Xtr.index.astype(str),
-            "LogKd_true": ytr.values.astype(float),
-            "LogKd_pred": y_pred_tr.astype(float),
-            "Leverage_h": h.astype(float),
-        }
-    ).set_index("Compound")
-
-    df_tr["AD_flag"] = np.where(df_tr["Leverage_h"] <= h_crit, "Inside AD", "Outside AD")
-    return df_tr, float(h_crit)
-
-
-# =========================
-# INSUBRIA BASIS (zgodnie z Twoim komentarzem)
-# Insubria plot pokazuje TYLKO nowe związki (spoza train i test).
-# Granice Y: min/max EKSPERYMENTALNE w TRAIN (y_train^exp).
-# =========================
-def compute_insubria_basis_for_polymer(state: ModelState, polymer: str):
-    est, selected_feats, XtX_inv, h_crit, Xtr, ytr = get_ad_basis_for_polymer(state, polymer)
-
-    y_min_train = float(np.min(ytr.values.astype(float)))
-    y_max_train = float(np.max(ytr.values.astype(float)))
 
     return {
         "est": est,
         "selected_feats": selected_feats,
         "XtX_inv": XtX_inv,
         "h_crit": float(h_crit),
-        "y_min_train": y_min_train,
-        "y_max_train": y_max_train,
         "train_index": set(Xtr.index.astype(str)),
         "test_index": set(state.X_test_all.index.astype(str)),
     }
@@ -530,15 +500,6 @@ def leverage_for_new(X_new: pd.DataFrame, XtX_inv: np.ndarray) -> np.ndarray:
     return h_new
 
 
-def filter_new_compounds_only(df_in: pd.DataFrame, compound_col: str, train_index: set, test_index: set) -> pd.DataFrame:
-    """
-    Insubria: zostaw tylko te wiersze, których ID nie jest w TRAIN ani w TEST.
-    """
-    ids = df_in[compound_col].astype(str)
-    mask_new = ~ids.isin(train_index) & ~ids.isin(test_index)
-    return df_in.loc[mask_new].copy()
-
-
 # =========================
 # Predictions
 # =========================
@@ -548,7 +509,7 @@ def predict_single_compound(state: ModelState, descriptor_dict: dict, polymers: 
 
     for pol in polymers:
         try:
-            basis = compute_insubria_basis_for_polymer(state, pol)
+            basis = compute_ad_basis_for_polymer(state, pol)
             est = basis["est"]
             selected_feats = basis["selected_feats"]
             XtX_inv = basis["XtX_inv"]
@@ -600,7 +561,7 @@ def predict_batch(state: ModelState, df_input: pd.DataFrame, polymers: list[str]
         raise ValueError(f"Missing required feature columns: {missing}")
 
     for pol in polymers:
-        basis = compute_insubria_basis_for_polymer(state, pol)
+        basis = compute_ad_basis_for_polymer(state, pol)
         est = basis["est"]
         selected_feats = basis["selected_feats"]
         XtX_inv = basis["XtX_inv"]
@@ -618,545 +579,521 @@ def predict_batch(state: ModelState, df_input: pd.DataFrame, polymers: list[str]
 
 
 # =========================
-# STREAMLIT UI
+# UI helpers
 # =========================
-st.set_page_config(
-    page_title="LogKd prediction for microplastics – two models",
-    layout="wide",
-)
+def inject_custom_css():
+    st.markdown(
+        """
+        <style>
+        /* ---- typography ---- */
+        html, body, [class*="css"] { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
 
-st.title("LogKd prediction for microplastics")
+        /* ---- main container ---- */
+        .block-container { padding-top: 1.6rem; max-width: 1150px; }
 
-st.write(
-    """
-This app allows you to use **two alternative GradientBoosting models**:
+        /* ---- hero header ---- */
+        .app-hero {
+            background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+            padding: 1.6rem 2rem;
+            border-radius: 18px;
+            color: #ffffff;
+            margin-bottom: 1.6rem;
+            box-shadow: 0 12px 32px rgba(15, 118, 110, 0.28);
+        }
+        .app-hero h1 { color: #ffffff; margin: 0; font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em; }
+        .app-hero p { color: rgba(255, 255, 255, 0.88); margin: 0.45rem 0 0; font-size: 0.98rem; }
 
-- **Gaussian descriptors** – model built with descriptors (e.g. π) computed via *Gaussian*,
-- **RDKit descriptors** – model built with descriptors computed via *RDKit*.
+        /* ---- buttons ---- */
+        .stButton > button {
+            border-radius: 10px;
+            font-weight: 600;
+            border: none;
+            background: #0f766e;
+            color: #ffffff;
+            padding: 0.5rem 1.3rem;
+            transition: all 0.15s ease;
+        }
+        .stButton > button:hover { background: #0d655d; transform: translateY(-1px); }
+        .stDownloadButton > button {
+            border-radius: 10px;
+            font-weight: 600;
+            border: 1px solid #0f766e;
+            background: transparent;
+            color: #0f766e;
+        }
+        .stDownloadButton > button:hover { background: #0f766e; color: #ffffff; }
 
-Both models share the same interface:
-- **SMILES input** (only for RDKit model)
-- **Single prediction** (with AD)
-- **Batch prediction** (with AD),
+        /* ---- tabs ---- */
+        .stTabs [data-baseweb="tab-list"] { gap: 6px; }
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 10px 10px 0 0;
+            padding: 0.4rem 1rem;
+            font-weight: 600;
+        }
+        .stTabs [aria-selected="true"] { background: rgba(15, 118, 110, 0.10); }
 
-Use the selector in the sidebar to choose which model you want to apply.
-"""
-)
-
-# --- wybór modelu ---
-model_name = st.sidebar.selectbox(
-    "Choose model / descriptor set",
-    list(MODEL_CONFIGS.keys()),
-    index=0,
-)
-
-# --- załaduj odpowiedni ModelState ---
-with st.spinner(f"Loading model data for: {model_name}"):
-    state = load_model_state(model_name)
-
-AVAILABLE_POLYMERS = [p for p in EXPECTED_POLYMERS if p in state.Y_wide.columns]
-if not AVAILABLE_POLYMERS:
-    st.error(f"No polymers found in Y_wide for model '{model_name}'. Check that the data loaded correctly.")
-    st.stop()
-
-FEATURE_COLUMNS = list(state.feature_columns)
-
-st.sidebar.markdown(f"**Active model:** `{model_name}`")
-st.sidebar.markdown("---")
-st.sidebar.header("Model settings")
-
-selected_polymers = st.sidebar.multiselect(
-    "Select polymers for prediction",
-    options=AVAILABLE_POLYMERS,
-    default=AVAILABLE_POLYMERS,
-)
-
-if not selected_polymers:
-    st.warning("Select at least one polymer to run predictions.")
-    st.stop()
-
-st.sidebar.markdown("---")
-st.sidebar.write("Descriptors used by the *selected* model:")
-for c in FEATURE_COLUMNS:
-    st.sidebar.write(f"- {c}")
-
-# Renamed 3rd tab to reflect strict definition
-if model_name == "RDKit descriptors":
-    tab_smiles, tab_single, tab_batch = st.tabs(
-        [
-            "SMILES input (RDKit auto descriptors)",
-            "Single prediction",
-            "Batch prediction",
-        ]
-    )
-else:
-    tab_single, tab_batch = st.tabs(
-        [
-            "Single prediction",
-            "Batch prediction",
-        ]
+        /* ---- polymer badge ---- */
+        .poly-badge {
+            color: #ffffff;
+            padding: 0.4rem 0.8rem;
+            border-radius: 9px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 0.55rem;
+            letter-spacing: 0.04em;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
-# =========================
-# SMILES → RDKit descriptors
-# =========================
-if model_name == "RDKit descriptors":
-    with tab_smiles:
-        st.subheader("Prediction directly from SMILES (RDKit descriptors)")
 
-        st.write("""
-Descriptors computed automatically:
+def render_prediction_cards(df_res: pd.DataFrame):
+    """Renderuje wynik pojedynczej predykcji jako kolumny z metrykami i statusem AD."""
+    if df_res.empty:
+        st.info("No predictions to show.")
+        return
 
-• M′
-                 
-• π
-
-The model requires additional descriptors (logD), provide them manually.
-""")
-
-        mode = st.radio("Mode", ["Single SMILES", "Batch (file upload)"])
-
-        # ---------- SINGLE ----------
-        if mode == "Single SMILES":
-            smiles = st.text_input("SMILES string")
-            compound_name = st.text_input("Compound name", "smiles_compound")
-
-            logD_input = st.number_input(
-                "logD (if required by model)",
-                value=0.0,
-                format="%.6f",
+    cols = st.columns(len(df_res))
+    for col, (_, row) in zip(cols, df_res.iterrows()):
+        with col:
+            pol = str(row["Polymer"])
+            color = poly_colors.get(pol, "#64748b")
+            display_name = POLYMER_NAMES.get(pol, pol)
+            st.markdown(
+                f"<div class='poly-badge' style='background:{color};'>{display_name}</div>",
+                unsafe_allow_html=True,
             )
 
-            if st.button("Predict from SMILES"):
-                if smiles.strip() == "":
-                    st.warning("Provide SMILES.")
-                else:
-                    try:
-                        desc = rdkit_descriptors_from_smiles(smiles)
-                        desc["logD"] = logD_input
+            val = row["LogKd_pred"]
+            flag = str(row["AD_flag"])
 
-                        df_res = predict_single_compound(
-                            state,
-                            desc,
-                            selected_polymers,
-                            compound_name,
-                        )
+            if pd.isna(val):
+                st.error("Prediction failed")
+                st.caption(flag)
+                continue
 
-                        st.dataframe(df_res, use_container_width=True)
+            st.metric("Predicted LogKd", f"{val:.3f}")
+            if pd.notna(row["Leverage_h"]) and pd.notna(row["h_crit"]):
+                st.caption(f"leverage h = {row['Leverage_h']:.3f}  ·  h* = {row['h_crit']:.3f}")
 
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+            if flag == "Inside AD":
+                st.success("Inside applicability domain")
+            elif flag.startswith("Error"):
+                st.error(flag)
+            else:
+                st.warning("Outside applicability domain")
 
-        # ---------- BATCH ----------
-        else:
-            uploaded = st.file_uploader(
-                "Upload CSV/Excel containing SMILES column",
-                type=["csv", "xlsx"],
-            )
 
-            smiles_col = st.text_input("SMILES column name", value="SMILES")
+# --- Short descriptor definitions (used for tooltips and the guide) ---
+DESCRIPTOR_INFO = {
+    "logD": "n-octanol/water distribution coefficient at a given pH (lipophilicity, accounting for ionization).",
+    "M": "M′ — molecular mass of the compound (used in a scaled form).",
+    "π": "Polarizability-to-molecular-volume ratio: π = α / V′ (α = polarizability, V′ = molecular volume).",
+    "V'": "V′ — molecular volume of the compound.",
+}
 
-            if uploaded is not None:
-                if uploaded.name.endswith(".csv"):
-                    df_in = pd.read_csv(uploaded)
-                else:
-                    df_in = pd.read_excel(uploaded)
 
-                st.write("Uploaded data preview:")
-                st.dataframe(df_in.head())
+def descriptor_help(feat: str):
+    return DESCRIPTOR_INFO.get(feat)
 
-                if smiles_col not in df_in.columns:
-                    st.error("SMILES column not found.")
-                else:
-                    if st.button("Run batch SMILES prediction"):
-                        rows = []
-
-                        for _, row in df_in.iterrows():
-                            try:
-                                desc = rdkit_descriptors_from_smiles(row[smiles_col])
-
-                                if "logD" in df_in.columns:
-                                    desc["logD"] = row["logD"]
-
-                                rows.append(desc)
-                            except Exception:
-                                rows.append({})
-
-                        df_desc = pd.DataFrame(rows)
-
-                        df_pred = predict_batch(
-                            state,
-                            df_desc,
-                            selected_polymers,
-                        )
-
-                        st.dataframe(df_pred.head(), use_container_width=True)
-
-                        csv_bytes = df_pred.to_csv(index=False).encode("utf-8")
-                        st.download_button(
-                            "Download predictions",
-                            data=csv_bytes,
-                            file_name="smiles_predictions.csv",
-                            mime="text/csv",
-                        )
 
 # =========================
-# Single prediction
+# Prediction tabs (reusable per model)
 # =========================
-with tab_single:
-    st.subheader(f"Single compound prediction – {model_name}")
+def render_single_prediction(state: ModelState, model_name: str, polymers: list[str]):
+    st.subheader("Single compound prediction")
 
-    compound_name = st.text_input("Compound ID / name", value="your_compound")
+    if not polymers:
+        st.warning("Select at least one polymer in the sidebar to run predictions.")
+        return
 
-    st.write(
-        "Provide descriptor values. These must match the scale used in the training data "
-        f"for **{model_name}**."
+    feature_columns = list(state.feature_columns)
+
+    compound_name = st.text_input(
+        "Compound ID / name", value="your_compound", key=f"{model_name}_single_name"
     )
+
+    st.write("Provide descriptor values (same scale as the training data for this model).")
 
     descriptor_values = {}
     cols = st.columns(3)
-    for i, feat in enumerate(FEATURE_COLUMNS):
+    for i, feat in enumerate(feature_columns):
         with cols[i % 3]:
             descriptor_values[feat] = st.number_input(
                 label=f"{feat}",
                 value=0.0,
                 format="%.6f",
+                help=descriptor_help(feat),
                 key=f"{model_name}_single_{feat}",
             )
 
     if st.button("Predict LogKd for this compound", key=f"{model_name}_btn_single"):
         with st.spinner("Running predictions..."):
-            df_res = predict_single_compound(state, descriptor_values, selected_polymers, compound_name)
+            df_res = predict_single_compound(state, descriptor_values, polymers, compound_name)
 
-        st.write("Predictions with applicability domain info:")
-        st.dataframe(df_res, use_container_width=True)
+        st.markdown("#### Predictions with applicability-domain info")
+        render_prediction_cards(df_res)
 
-        st.markdown("### Insubria plots for this compound (STRICT: only NEW compound)")
+        with st.expander("Show full results table"):
+            df_show = df_res.copy()
+            df_show["Polymer"] = df_show["Polymer"].map(lambda p: POLYMER_NAMES.get(str(p), p))
+            st.dataframe(df_show, use_container_width=True)
 
-        for pol in selected_polymers:
-            st.markdown(f"**Polymer: {pol}**")
-            poly_color = poly_colors.get(pol, "gray")
 
-            row_pol = df_res[df_res["Polymer"] == pol]
-            if row_pol.empty:
-                st.warning(f"No prediction for polymer {pol}.")
-                continue
+def render_batch_prediction(state: ModelState, model_name: str, polymers: list[str]):
+    st.subheader("Batch prediction from file")
 
-            row_pol = row_pol.iloc[0]
-            h_new = row_pol["Leverage_h"]
-            y_new = row_pol["LogKd_pred"]
+    if not polymers:
+        st.warning("Select at least one polymer in the sidebar to run predictions.")
+        return
 
-            if pd.isna(h_new) or pd.isna(y_new):
-                st.warning(f"Cannot build Insubria plot for {pol} (no valid AD data for this prediction).")
-                continue
-
-            try:
-                basis = compute_insubria_basis_for_polymer(state, pol)
-            except Exception as e:
-                st.error(f"Cannot build Insubria plot for {pol}: {e}")
-                continue
-
-            h_crit = basis["h_crit"]
-            y_min_tr = basis["y_min_train"]
-            y_max_tr = basis["y_max_train"]
-
-            fig, ax = plt.subplots(figsize=(6, 4))
-
-            # STRICT Insubria: plot only NEW compound(s)
-            ax.scatter(
-                h_new,
-                y_new,
-                marker="*",
-                s=190,
-                linewidths=1.2,
-                label=f"New compound: {compound_name}",
-                color=poly_color,
-                edgecolors="black",
-                alpha=0.8,
-            )
-
-            ax.axvline(
-                h_crit,
-                linestyle="--",
-                linewidth=1.5,
-                color="gray",
-                label=f"h* = {h_crit:.3f}",
-            )
-
-            # y-bounds = min/max EXPERIMENTAL from TRAIN
-            x_min, x_max = ax.get_xlim()
-            ax.hlines([y_min_tr, y_max_tr], x_min, x_max, linewidth=1.2, color="gray")
-            ax.set_xlim(x_min, x_max)
-
-            ax.set_xlabel("Leverage (h)")
-            ax.set_ylabel("Predicted LogKd")
-            ax.set_title(f"Insubria plot (NEW only) – {pol} – {model_name}")
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-
-            st.pyplot(fig)
-
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
-            buf.seek(0)
-
-            st.download_button(
-                label=f"Download Insubria plot for {pol} as PNG",
-                data=buf,
-                file_name=f"insubria_single_{compound_name}_{pol}_{model_name}.png",
-                mime="image/png",
-                key=f"dl_single_{pol}_{model_name}",
-            )
-
-# =========================
-# Batch prediction
-# =========================
-with tab_batch:
-    st.subheader(f"Batch prediction from file – {model_name}")
+    feature_columns = list(state.feature_columns)
 
     st.write(
+        "Upload a **CSV or Excel** file containing at least the following descriptor columns:"
+    )
+    st.code(", ".join(feature_columns), language="text")
+
+    uploaded_file = st.file_uploader(
+        "Upload CSV or Excel", type=["csv", "xlsx"], key=f"{model_name}_upload"
+    )
+
+    if uploaded_file is None:
+        return
+
+    if uploaded_file.name.lower().endswith(".csv"):
+        df_input = pd.read_csv(uploaded_file)
+    else:
+        df_input = pd.read_excel(uploaded_file)
+
+    st.write("Preview of uploaded data:")
+    st.dataframe(df_input.head(), use_container_width=True)
+
+    missing_cols = [c for c in feature_columns if c not in df_input.columns]
+    if missing_cols:
+        st.error(f"Missing required feature columns: {missing_cols}")
+        return
+
+    if st.button("Run batch prediction", key=f"{model_name}_btn_batch"):
+        with st.spinner("Running batch predictions..."):
+            try:
+                df_pred = predict_batch(state, df_input, polymers)
+            except Exception as e:
+                st.error(f"Error during prediction: {e}")
+                return
+
+        st.markdown("#### Applicability-domain summary")
+        summary_cols = st.columns(len(polymers))
+        for s_col, pol in zip(summary_cols, polymers):
+            flag_col = f"AD_flag_{pol}"
+            with s_col:
+                color = poly_colors.get(pol, "#64748b")
+                st.markdown(
+                    f"<div class='poly-badge' style='background:{color};'>{POLYMER_NAMES.get(pol, pol)}</div>",
+                    unsafe_allow_html=True,
+                )
+                if flag_col in df_pred.columns:
+                    inside = int((df_pred[flag_col] == "Inside AD").sum())
+                    total = int(df_pred[flag_col].notna().sum())
+                    st.metric("Inside AD", f"{inside} / {total}")
+                else:
+                    st.caption("n/a")
+
+        st.markdown("#### Predictions (first rows)")
+        st.dataframe(df_pred.head(), use_container_width=True)
+
+        csv_bytes = df_pred.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Download full predictions as CSV",
+            data=csv_bytes,
+            file_name=f"logKd_predictions_with_AD_{model_name}.csv",
+            mime="text/csv",
+            key=f"{model_name}_dl_batch",
+        )
+
+
+def render_smiles_prediction(state: ModelState, model_name: str, polymers: list[str]):
+    st.subheader("Prediction directly from SMILES (RDKit descriptors)")
+
+    if not polymers:
+        st.warning("Select at least one polymer in the sidebar to run predictions.")
+        return
+
+    st.write(
+        "Descriptors computed automatically from SMILES: **M′** and **π**. "
+        "The model also needs **logD**, which you provide manually."
+    )
+
+    mode = st.radio(
+        "Mode",
+        ["Single SMILES", "Batch (file upload)"],
+        horizontal=True,
+        key=f"{model_name}_smiles_mode",
+    )
+
+    # ---------- SINGLE ----------
+    if mode == "Single SMILES":
+        smiles = st.text_input("SMILES string", key=f"{model_name}_smiles_str")
+        compound_name = st.text_input(
+            "Compound name", "smiles_compound", key=f"{model_name}_smiles_name"
+        )
+        logD_input = st.number_input(
+            "logD (if required by model)",
+            value=0.0,
+            format="%.6f",
+            help=descriptor_help("logD"),
+            key=f"{model_name}_smiles_logD",
+        )
+
+        if st.button("Predict from SMILES", key=f"{model_name}_btn_smiles_single"):
+            if smiles.strip() == "":
+                st.warning("Provide SMILES.")
+            else:
+                try:
+                    desc = rdkit_descriptors_from_smiles(smiles)
+                    desc["logD"] = logD_input
+
+                    df_res = predict_single_compound(state, desc, polymers, compound_name)
+
+                    st.markdown("#### Predictions")
+                    render_prediction_cards(df_res)
+
+                    with st.expander("Show full results table"):
+                        df_show = df_res.copy()
+                        df_show["Polymer"] = df_show["Polymer"].map(lambda p: POLYMER_NAMES.get(str(p), p))
+                        st.dataframe(df_show, use_container_width=True)
+
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # ---------- BATCH ----------
+    else:
+        uploaded = st.file_uploader(
+            "Upload CSV/Excel containing SMILES column",
+            type=["csv", "xlsx"],
+            key=f"{model_name}_smiles_upload",
+        )
+        smiles_col = st.text_input(
+            "SMILES column name", value="SMILES", key=f"{model_name}_smiles_col"
+        )
+
+        if uploaded is not None:
+            if uploaded.name.endswith(".csv"):
+                df_in = pd.read_csv(uploaded)
+            else:
+                df_in = pd.read_excel(uploaded)
+
+            st.write("Uploaded data preview:")
+            st.dataframe(df_in.head(), use_container_width=True)
+
+            if smiles_col not in df_in.columns:
+                st.error("SMILES column not found.")
+            else:
+                if st.button("Run batch SMILES prediction", key=f"{model_name}_btn_smiles_batch"):
+                    rows = []
+                    for _, row in df_in.iterrows():
+                        try:
+                            desc = rdkit_descriptors_from_smiles(row[smiles_col])
+                            if "logD" in df_in.columns:
+                                desc["logD"] = row["logD"]
+                            rows.append(desc)
+                        except Exception:
+                            rows.append({})
+
+                    df_desc = pd.DataFrame(rows)
+                    df_pred = predict_batch(state, df_desc, polymers)
+
+                    st.write("Predictions (first rows):")
+                    st.dataframe(df_pred.head(), use_container_width=True)
+
+                    csv_bytes = df_pred.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "Download predictions",
+                        data=csv_bytes,
+                        file_name="smiles_predictions.csv",
+                        mime="text/csv",
+                        key=f"{model_name}_dl_smiles_batch",
+                    )
+
+
+# =========================
+# STREAMLIT UI
+# =========================
+st.set_page_config(
+    page_title="MP-AdsorbNet",
+    page_icon="🔬",
+    layout="wide",
+)
+
+inject_custom_css()
+
+st.markdown(
+    """
+    <div class="app-hero">
+        <h1>🔬 MP-AdsorbNet</h1>
+        <p>Predicting <b>LogKd</b> (log₁₀ microplastic/water partition coefficient) for adsorption of organic
+        pollutants onto three common microplastics: polyethylene (PE), polypropylene (PP) and polystyrene (PS),
+        using multi-output GradientBoosting models with applicability-domain (leverage) checks.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# =========================
+# Sidebar
+# =========================
+st.sidebar.markdown("## ⚙️ MP-AdsorbNet")
+st.sidebar.caption("Microplastic adsorption (LogKd) predictor")
+st.sidebar.markdown("---")
+st.sidebar.subheader("Prediction settings")
+
+selected_polymers = st.sidebar.multiselect(
+    "Select polymers for prediction",
+    options=EXPECTED_POLYMERS,
+    default=EXPECTED_POLYMERS,
+    format_func=lambda p: f"{POLYMER_NAMES.get(p, p)} ({p})",
+)
+if not selected_polymers:
+    st.sidebar.warning("Select at least one polymer to enable predictions.")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("📬 Contact & feedback")
+st.sidebar.markdown(
+    "Found a bug, have a question, or want to share feedback? Get in touch:"
+)
+st.sidebar.markdown(
+    f"- ✉️ **Email:** [{CONTACT_EMAIL}](mailto:{CONTACT_EMAIL}"
+    f"?subject=MP-AdsorbNet%20feedback)"
+)
+if ISSUES_URL:
+    st.sidebar.markdown(f"- 🐞 **Report an issue:** [open a ticket]({ISSUES_URL})")
+st.sidebar.caption("Your feedback helps improve the models and the app.")
+
+# =========================
+# Top-level navigation: Home + one tab per model
+# =========================
+tab_home, tab_qm, tab_rdkit = st.tabs(
+    ["🏠 Home & guide", "⚛️ QM model", "🧬 RDKit model"]
+)
+
+# ---------------- HOME ----------------
+with tab_home:
+    st.header("About this app")
+    st.markdown(
         """
-Upload a **CSV or Excel** file that contains at least the following columns  
-(these are the descriptors used in the selected model):
+**MP-AdsorbNet** predicts **LogKd** (logarithm of the microplastic/water partition coefficient) *Kd* for the **adsorption of organic pollutants onto microplastics**. *Kd* (typical units **L/kg**) describes how strongly a compound partitions from water onto a
+microplastic particle; a **higher LogKd means a stronger adsorption affinity** for that polymer.
 """
     )
-    st.code(", ".join(FEATURE_COLUMNS), language="text")
 
-    uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"], key=f"{model_name}_upload")
+    st.subheader("Polymers covered")
+    st.markdown(
+        """
+| Code | Polymer |
+|------|---------|
+| **PE** | Polyethylene |
+| **PP** | Polypropylene |
+| **PS** | Polystyrene |
+"""
+    )
 
-    if uploaded_file is not None:
-        if uploaded_file.name.lower().endswith(".csv"):
-            df_input = pd.read_csv(uploaded_file)
-        else:
-            df_input = pd.read_excel(uploaded_file)
+    st.subheader("Molecular descriptors")
+    st.markdown(
+        """
+The models use a small set of physicochemical descriptors of the organic compound:
 
-        st.write("Preview of uploaded data:")
-        st.dataframe(df_input.head(), use_container_width=True)
+- **logD** — *n*-octanol/water distribution coefficient at a given pH. A lipophilicity measure
+  that, unlike logP, accounts for ionization of the compound at that pH.
+- **M′** — molecular mass of the compound (used in a scaled form).
+- **π** — polarizability-to-molecular-volume ratio, defined as **π = α / V′**, where *α* is the
+  molecular polarizability and *V′* the molecular volume. It reflects the electronic
+  polarizability density of the molecule.
+"""
+    )
 
-        missing_cols = [c for c in FEATURE_COLUMNS if c not in df_input.columns]
-        if missing_cols:
-            st.error(f"Missing required feature columns: {missing_cols}")
-        else:
-            if st.button("Run batch prediction", key=f"{model_name}_btn_batch"):
-                with st.spinner("Running batch predictions..."):
-                    try:
-                        df_pred = predict_batch(state, df_input, selected_polymers)
-                    except Exception as e:
-                        st.error(f"Error during prediction: {e}")
-                    else:
-                        st.write("Predictions with applicability domain info (first rows):")
-                        st.dataframe(df_pred.head(), use_container_width=True)
+    st.subheader("The two models")
+    st.markdown(
+        """
+Both models are **multi-output GradientBoosting regressors** (one model per polymer) and share the
+same descriptors, but differ in how those descriptors are obtained:
 
-                        csv_bytes = df_pred.to_csv(index=False).encode("utf-8")
-                        st.download_button(
-                            label="Download full predictions as CSV",
-                            data=csv_bytes,
-                            file_name=f"logKd_predictions_with_AD_{model_name}.csv",
-                            mime="text/csv",
-                        )
+- **⚛️ QM model** — descriptors computed at the **quantum-mechanical level using *Gaussian 09***
+  (e.g. the polarizability *α* comes from the QM calculation).
+- **🧬 RDKit model** — descriptors computed with **RDKit**, which also allows prediction
+  **directly from a SMILES string**. Here *M′* = MW/100, *V′* = LabuteASA/100, and
+  *π* = MolMR / *V′* (molar refractivity used as a polarizability surrogate); logD is still
+  provided by the user.
 
-                        st.markdown("### Insubria plots for this batch (STRICT: only NEW compounds)")
+Open the **⚛️ QM model** or **🧬 RDKit model** tab above to make predictions.
+"""
+    )
 
-                        # optional: allow user to specify ID column to filter out train/test
-                        compound_id_col = st.text_input(
-                            "Optional: column name with compound IDs (to exclude those present in train/test). "
-                            "Leave empty to treat all rows as NEW.",
-                            value="",
-                            key=f"{model_name}_batch_id_col",
-                        ).strip()
+    st.subheader("Applicability domain (AD)")
+    st.markdown(
+        r"""
+Every prediction reports whether the compound falls **inside the applicability domain** of the
+model, based on the **leverage** *h* compared with a warning threshold *h**. Predictions for compounds
+**outside the AD** are extrapolations and should be treated with caution.
+"""
+    )
 
-                        df_for_plot = df_pred.copy()
-                        if compound_id_col and compound_id_col in df_for_plot.columns:
-                            # filter out compounds that belong to train/test for each polymer basis
-                            # (train/test sets are the same per model_name, so OK to do globally)
-                            # We'll filter once using polymer-independent sets from the first polymer basis.
-                            try:
-                                basis0 = compute_insubria_basis_for_polymer(state, selected_polymers[0])
-                                train_set = basis0["train_index"]
-                                test_set = basis0["test_index"]
-                                df_for_plot = filter_new_compounds_only(df_for_plot, compound_id_col, train_set, test_set)
-                                st.info(f"Filtered to NEW-only rows: {len(df_for_plot)} (excluded train/test IDs).")
-                            except Exception as e:
-                                st.warning(f"Could not filter by ID column ({e}). Plotting all rows as NEW.")
+    st.subheader("How to use")
+    st.markdown(
+        """
+1. In the **sidebar**, choose which **polymers** to predict for.
+2. Open a model tab: **⚛️ QM model** or **🧬 RDKit model**.
+3. Pick a sub-tab:
+   - **🔹 Single prediction** — type descriptor values for one compound.
+   - **📦 Batch prediction** — upload a CSV/Excel with the descriptor columns.
+   - **🧪 SMILES input** (RDKit only) — paste a SMILES; M′ and π are computed automatically.
+"""
+    )
 
-                        for pol_batch in selected_polymers:
-                            st.markdown(f"**Polymer: {pol_batch}**")
-                            poly_color = poly_colors.get(pol_batch, "gray")
+# ---------------- QM MODEL ----------------
+with tab_qm:
+    qm_name = "Quantum mechanical (QM) descriptors"
+    st.header("⚛️ Quantum mechanical (QM) descriptors model")
+    st.caption("Descriptors computed at the quantum-mechanical level using Gaussian 09.")
 
-                            col_h = f"Leverage_h_{pol_batch}"
-                            col_y = f"LogKd_{pol_batch}"
-                            if col_h not in df_for_plot.columns or col_y not in df_for_plot.columns:
-                                st.warning(f"No prediction columns for polymer {pol_batch} in batch output.")
-                                continue
+    try:
+        with st.spinner("Loading QM model…"):
+            qm_state = load_model_state(qm_name)
+    except Exception as e:
+        st.error(f"Could not load the QM model: {e}")
+    else:
+        qm_polymers = [p for p in selected_polymers if p in qm_state.Y_wide.columns]
+        sub_single, sub_batch = st.tabs(["🔹 Single prediction", "📦 Batch prediction"])
+        with sub_single:
+            render_single_prediction(qm_state, qm_name, qm_polymers)
+        with sub_batch:
+            render_batch_prediction(qm_state, qm_name, qm_polymers)
 
-                            try:
-                                basis = compute_insubria_basis_for_polymer(state, pol_batch)
-                            except Exception as e:
-                                st.error(f"Cannot build Insubria plot for {pol_batch}: {e}")
-                                continue
+# ---------------- RDKIT MODEL ----------------
+with tab_rdkit:
+    rk_name = "RDKit descriptors"
+    st.header("🧬 RDKit descriptors model")
+    st.caption("Descriptors computed automatically with RDKit — including directly from SMILES.")
 
-                            h_crit = basis["h_crit"]
-                            y_min_tr = basis["y_min_train"]
-                            y_max_tr = basis["y_max_train"]
-
-                            h_new = df_for_plot[col_h].values
-                            y_new = df_for_plot[col_y].values
-
-                            fig_b, ax_b = plt.subplots(figsize=(6, 4))
-
-                            # STRICT Insubria: plot only NEW batch points (no training points)
-                            ax_b.scatter(
-                                h_new,
-                                y_new,
-                                marker="^",
-                                s=140,
-                                label="New compounds (batch)",
-                                alpha=0.75,
-                                color=poly_color,
-                                edgecolors="black",
-                                linewidths=0.6,
-                            )
-
-                            ax_b.axvline(
-                                h_crit,
-                                linestyle="--",
-                                linewidth=1.5,
-                                color="gray",
-                                label=f"h* = {h_crit:.3f}",
-                            )
-
-                            x_min, x_max = ax_b.get_xlim()
-                            ax_b.hlines([y_min_tr, y_max_tr], x_min, x_max, linewidth=1.2, color="gray")
-                            ax_b.set_xlim(x_min, x_max)
-
-                            ax_b.set_xlabel("Leverage (h)")
-                            ax_b.set_ylabel("Predicted LogKd")
-                            ax_b.set_title(f"Insubria plot (NEW only) – {pol_batch} – {model_name}")
-                            ax_b.legend()
-                            ax_b.grid(True, alpha=0.3)
-
-                            st.pyplot(fig_b)
-
-                            buf_b = io.BytesIO()
-                            fig_b.savefig(buf_b, format="png", dpi=300, bbox_inches="tight")
-                            buf_b.seek(0)
-
-                            st.download_button(
-                                label=f"Download batch Insubria plot ({pol_batch}) as PNG",
-                                data=buf_b,
-                                file_name=f"insubria_batch_NEWonly_{pol_batch}_{model_name}.png",
-                                mime="image/png",
-                                key=f"dl_batch_insubria_{pol_batch}_{model_name}",
-                            )
-
-# =========================
-# Training AD plot (training only)
-# =========================
-# with tab_training_ad:
-#     st.subheader(f"Training AD plot – training data only – {model_name}")
-
-#     pol_for_ad = st.selectbox(
-#         "Select polymer for training AD plot",
-#         options=AVAILABLE_POLYMERS,
-#         index=0,
-#         key=f"{model_name}_ad_polymer_train",
-#     )
-
-#     if st.button("Generate training AD plot (training)", key=f"{model_name}_btn_ad_train"):
-#         try:
-#             df_tr, h_crit = compute_training_ad_plot_data(state, pol_for_ad)
-#         except Exception as e:
-#             st.error(f"Cannot generate training AD plot: {e}")
-#         else:
-#             poly_color = poly_colors.get(pol_for_ad, "gray")
-
-#             st.markdown(
-#                 f"""
-# **Training AD plot** (leverage vs predicted LogKd) for polymer **{pol_for_ad}** (training data) in **{model_name}**.
-
-# Vertical line at **h* = 3(p+1)/n = {h_crit:.3f}** marks the applicability domain threshold.  
-# Points with leverage > h* are **outside AD**.
-
-# *(Note: this plot is training-domain visualization; strict Insubria should show only NEW compounds.)*
-# """
-#             )
-
-#             fig_t, ax_t = plt.subplots(figsize=(7, 5))
-
-#             df_in = df_tr[df_tr["AD_flag"] == "Inside AD"]
-#             df_out = df_tr[df_tr["AD_flag"] == "Outside AD"]
-
-#             if not df_in.empty:
-#                 ax_t.scatter(
-#                     df_in["Leverage_h"],
-#                     df_in["LogKd_pred"],
-#                     label="Training – inside AD",
-#                     alpha=0.8,
-#                     color=poly_color,
-#                 )
-#             if not df_out.empty:
-#                 ax_t.scatter(
-#                     df_out["Leverage_h"],
-#                     df_out["LogKd_pred"],
-#                     label="Training – outside AD",
-#                     marker="s",
-#                     alpha=0.9,
-#                     facecolors="none",
-#                     edgecolors=poly_color,
-#                     linewidths=1.2,
-#                 )
-
-#             ax_t.axvline(
-#                 h_crit,
-#                 linestyle="--",
-#                 color="gray",
-#                 linewidth=1.5,
-#                 label=f"h* = {h_crit:.3f}",
-#             )
-
-#             # (opcjonalnie) y-limits z exp TRAIN – jeśli chcesz też tu spójność z opisem
-#             ytr_exp = df_tr["LogKd_true"].astype(float)
-#             y_min_exp = float(ytr_exp.min())
-#             y_max_exp = float(ytr_exp.max())
-#             x_min, x_max = ax_t.get_xlim()
-#             ax_t.hlines([y_min_exp, y_max_exp], x_min, x_max, linewidth=1.0, color="gray")
-#             ax_t.set_xlim(x_min, x_max)
-
-#             ax_t.set_xlabel("Leverage (h)")
-#             ax_t.set_ylabel("Predicted LogKd")
-#             ax_t.set_title(f"Training AD plot – training data ({pol_for_ad}) – {model_name}")
-#             ax_t.legend()
-#             ax_t.grid(True, alpha=0.3)
-
-#             st.pyplot(fig_t)
-
-#             buf_t = io.BytesIO()
-#             fig_t.savefig(buf_t, format="png", dpi=300, bbox_inches="tight")
-#             buf_t.seek(0)
-
-#             st.download_button(
-#                 label="Download training AD plot as PNG",
-#                 data=buf_t,
-#                 file_name=f"training_AD_plot_{pol_for_ad}_{model_name}.png",
-#                 mime="image/png",
-#                 key=f"{model_name}_dl_training_ad",
-#             )
-
-#             csv_tr = df_tr.reset_index().to_csv(index=False).encode("utf-8")
-#             st.download_button(
-#                 label="Download training AD data as CSV",
-#                 data=csv_tr,
-#                 file_name=f"training_AD_data_{pol_for_ad}_{model_name}.csv",
-#                 mime="text/csv",
-#                 key=f"{model_name}_dl_training_ad_csv",
-#             )
-
-#             st.write("Data used for the plot:")
-#             st.dataframe(df_tr.sort_values("Leverage_h", ascending=False), use_container_width=True)
-
+    try:
+        with st.spinner("Loading RDKit model…"):
+            rk_state = load_model_state(rk_name)
+    except Exception as e:
+        st.error(f"Could not load the RDKit model: {e}")
+    else:
+        rk_polymers = [p for p in selected_polymers if p in rk_state.Y_wide.columns]
+        sub_smiles, sub_single, sub_batch = st.tabs(
+            ["🧪 SMILES input", "🔹 Single prediction", "📦 Batch prediction"]
+        )
+        with sub_smiles:
+            render_smiles_prediction(rk_state, rk_name, rk_polymers)
+        with sub_single:
+            render_single_prediction(rk_state, rk_name, rk_polymers)
+        with sub_batch:
+            render_batch_prediction(rk_state, rk_name, rk_polymers)
 
 st.markdown("---")
 st.caption(
-    "Use the model selector in the sidebar to switch between Gaussian-based and RDKit-based models. "
+    "MP-AdsorbNet · QM descriptors via Gaussian 09 · RDKit descriptors via RDKit. "
     "Each model uses its own data, train/test split and (optionally) saved hyperparameters."
 )
