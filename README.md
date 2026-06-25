@@ -1,13 +1,13 @@
-# 🔬 MP-AdsorbNet
+# 🔬 POPA (Polymer–Organic Pollutant Adsorption)
 
 **Predict the adsorption capacity (LogKd) of organic pollutants onto microplastics.**
 
-MP-AdsorbNet is a simple Streamlit app that predicts **LogKd** — the base-10 logarithm of the
+POPA is a simple Streamlit app that predicts **LogKd** — the base-10 logarithm of the
 sorption (distribution) coefficient *Kd* — for three common microplastics:
 **polyethylene (PE)**, **polypropylene (PP)** and **polystyrene (PS)**.
 A higher LogKd means a stronger adsorption affinity of the compound for that polymer.
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://mp-adsorbnet.streamlit.app)
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://popa-mp.streamlit.app)
 
 ---
 
@@ -53,14 +53,14 @@ For every organic compound the models use three physicochemical descriptors:
 ### Option 1 — Use the hosted app (no install)
 
 Just click the badge above, or open:
-👉 **https://mp-adsorbnet.streamlit.app**
+👉 **https://popa-mp.streamlit.app**
 
 ### Option 2 — Run locally
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/<your-username>/mp-adsorbnet.git
-cd mp-adsorbnet
+git clone https://github.com/<your-username>/popa.git
+cd popa
 
 # 2. (Recommended) create a virtual environment
 python -m venv .venv
