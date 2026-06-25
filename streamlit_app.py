@@ -921,7 +921,7 @@ def render_smiles_prediction(state: ModelState, model_name: str, polymers: list[
 # STREAMLIT UI
 # =========================
 st.set_page_config(
-    page_title="MP-AdsorbNet",
+    page_title="POPA (Polymer–Organic Pollutant Adsorption)",
     page_icon="🔬",
     layout="wide",
 )
@@ -931,7 +931,7 @@ inject_custom_css()
 st.markdown(
     """
     <div class="app-hero">
-        <h1>🔬 MP-AdsorbNet</h1>
+        <h1>🔬 POPA (Polymer–Organic Pollutant Adsorption)</h1>
         <p>Predicting <b>LogKd</b> (log₁₀ microplastic/water partition coefficient) for adsorption of organic
         pollutants onto three common microplastics: polyethylene (PE), polypropylene (PP) and polystyrene (PS),
         using multi-output GradientBoosting models with applicability-domain (leverage) checks.</p>
@@ -942,8 +942,9 @@ st.markdown(
 
 # =========================
 # Sidebar
-# =========================
-st.sidebar.markdown("## ⚙️ MP-AdsorbNet")
+# ========================= 
+st.sidebar.markdown("## ⚙️ POPA")
+st.sidebar.caption("Polymer–Organic Pollutant Adsorption")
 st.sidebar.caption("Microplastic adsorption (LogKd) predictor")
 st.sidebar.markdown("---")
 st.sidebar.subheader("Prediction settings")
@@ -964,7 +965,7 @@ st.sidebar.markdown(
 )
 st.sidebar.markdown(
     f"- ✉️ **Email:** [{CONTACT_EMAIL}](mailto:{CONTACT_EMAIL}"
-    f"?subject=MP-AdsorbNet%20feedback)"
+    f"?subject=POPA%20feedback)"
 )
 if ISSUES_URL:
     st.sidebar.markdown(f"- 🐞 **Report an issue:** [open a ticket]({ISSUES_URL})")
@@ -982,8 +983,8 @@ with tab_home:
     st.header("About this app")
     st.markdown(
         """
-**MP-AdsorbNet** predicts **LogKd** (logarithm of the microplastic/water partition coefficient) *Kd* for the **adsorption of organic pollutants onto microplastics**. *Kd* (typical units **L/kg**) describes how strongly a compound partitions from water onto a
-microplastic particle; a **higher LogKd means a stronger adsorption affinity** for that polymer.
+**POPA** predicts **LogKd** (logarithm of the microplastic/water partition coefficient) *Kd* for the **adsorption of organic pollutants onto microplastics**. *Kd* (typical units **L/kg**) describes how strongly a compound partitions from water onto a
+microplastic particle; a higher LogKd means a stronger adsorption affinity for that polymer.
 """
     )
 
@@ -1094,6 +1095,6 @@ with tab_rdkit:
 
 st.markdown("---")
 st.caption(
-    "MP-AdsorbNet · QM descriptors via Gaussian 09 · RDKit descriptors via RDKit. "
+    "POPA · QM descriptors via Gaussian 09 · RDKit descriptors via RDKit. "
     "Each model uses its own data, train/test split and (optionally) saved hyperparameters."
 )
