@@ -31,7 +31,7 @@ POLYMER_NAMES = {
 }
 
 # --- Contact / feedback (EDIT THESE) ---
-CONTACT_EMAIL = "to be updated"        # <-- podmień na swój adres
+CONTACT_EMAIL = "update@soon"        # <-- podmień na swój adres
 ISSUES_URL = ""                                  # <-- opcjonalnie: link do repo/Issues (np. GitHub), zostaw "" jeśli brak
 
 # --- Feature selection config (wspólne dla obu modeli) ---
